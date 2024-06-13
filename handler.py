@@ -1,7 +1,6 @@
 import boto3
 import datetime
 import json
-import os
 import re
 import sys
 import time
@@ -13,57 +12,13 @@ from slack_bolt.adapter.aws_lambda import SlackRequestHandler
 
 from openai import OpenAI
 
-BOT_CURSOR = os.environ.get("BOT_CURSOR", ":robot_face:")
-
-# Set up Slack API credentials
-SLACK_BOT_TOKEN = os.environ["SLACK_BOT_TOKEN"]
-SLACK_SIGNING_SECRET = os.environ["SLACK_SIGNING_SECRET"]
-
-# Keep track of conversation history by thread and user
-DYNAMODB_TABLE_NAME = os.environ.get("DYNAMODB_TABLE_NAME", "slack-ai-bot-context")
-
-# Set up ChatGPT API credentials
-OPENAI_ORG_ID = os.environ.get("OPENAI_ORG_ID", None)
-OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", None)
-OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "gpt-4o")
-
-IMAGE_MODEL = os.environ.get("IMAGE_MODEL", "dall-e-3")
-IMAGE_QUALITY = os.environ.get("IMAGE_QUALITY", "hd")  # standard, hd
-IMAGE_SIZE = os.environ.get("IMAGE_SIZE", "1024x1024")
-IMAGE_STYLE = os.environ.get("IMAGE_STYLE", "vivid")  # vivid, natural
-
-# Set up System messages
-SYSTEM_MESSAGE = os.environ.get("SYSTEM_MESSAGE", "None")
-
-TEMPERATURE = float(os.environ.get("TEMPERATURE", 0))
-
-MAX_LEN_SLACK = int(os.environ.get("MAX_LEN_SLACK", 3000))
-MAX_LEN_OPENAI = int(os.environ.get("MAX_LEN_OPENAI", 4000))
-
-KEYWARD_IMAGE = "그려줘"
-
-MSG_PREVIOUS = "이전 대화 내용 확인 중... " + BOT_CURSOR
-MSG_IMAGE_DESCRIBE = "이미지 감상 중... " + BOT_CURSOR
-MSG_IMAGE_GENERATE = "이미지 생성 준비 중... " + BOT_CURSOR
-MSG_IMAGE_DRAW = "이미지 그리는 중... " + BOT_CURSOR
-MSG_RESPONSE = "응답 기다리는 중... " + BOT_CURSOR
-
-COMMAND_DESCRIBE = "Describe the image in great detail as if viewing a photo."
-COMMAND_GENERATE = "Convert the above sentence into a command for DALL-E to generate an image within 1000 characters. Just give me a prompt."
-
-CONVERSION_ARRAY = [
-    ["**", "*"],
-    ["#### ", "🔸 "],
-    ["### ", "🔶 "],
-    ["## ", "🟠 "],
-    ["# ", "🟡 "],
-]
-
+from env import env_config
+from slack_keyword import *
 
 # Initialize Slack app
 app = App(
-    token=SLACK_BOT_TOKEN,
-    signing_secret=SLACK_SIGNING_SECRET,
+    token=env_config.SLACK_BOT_TOKEN,
+    signing_secret=env_config.SLACK_SIGNING_SECRET,
     process_before_response=True,
 )
 
@@ -73,12 +28,12 @@ bot_id = app.client.api_call("auth.test")["user_id"]
 
 # Initialize DynamoDB
 dynamodb = boto3.resource("dynamodb")
-table = dynamodb.Table(DYNAMODB_TABLE_NAME)
+table = dynamodb.Table(env_config.DYNAMODB_TABLE_NAME)
 
 # Initialize OpenAI
 openai = OpenAI(
-    organization=OPENAI_ORG_ID if OPENAI_ORG_ID != "None" else None,
-    api_key=OPENAI_API_KEY,
+    organization=env_config.OPENAI_ORG_ID if env_config.OPENAI_ORG_ID != "None" else None,
+    api_key=env_config.OPENAI_API_KEY,
 )
 
 
@@ -126,7 +81,7 @@ def replace_text(text):
 def chat_update(say, channel, thread_ts, latest_ts, message="", continue_thread=False):
     # print("chat_update: {}".format(message))
 
-    if sys.getsizeof(message) > MAX_LEN_SLACK:
+    if sys.getsizeof(message) > env_config.MAX_LEN_SLACK:
         split_key = "\n\n"
         if "```" in message:
             split_key = "```"
@@ -170,9 +125,9 @@ def chat_update(say, channel, thread_ts, latest_ts, message="", continue_thread=
 # Reply to the message
 def reply_text(messages, say, channel, thread_ts, latest_ts, user):
     stream = openai.chat.completions.create(
-        model=OPENAI_MODEL,
+        model=env_config.OPENAI_MODEL,
         messages=messages,
-        temperature=TEMPERATURE,
+        temperature=env_config.TEMPERATURE,
         stream=True,
         user=user,
     )
@@ -200,11 +155,11 @@ def reply_text(messages, say, channel, thread_ts, latest_ts, user):
 # Reply to the image
 def reply_image(prompt, say, channel, thread_ts, latest_ts):
     response = openai.images.generate(
-        model=IMAGE_MODEL,
+        model=env_config.IMAGE_MODEL,
         prompt=prompt,
-        quality=IMAGE_QUALITY,
-        size=IMAGE_SIZE,
-        style=IMAGE_STYLE,
+        quality=env_config.IMAGE_QUALITY,
+        size=env_config.IMAGE_SIZE,
+        style=env_config.IMAGE_STYLE,
         n=1,
     )
 
@@ -213,8 +168,13 @@ def reply_image(prompt, say, channel, thread_ts, latest_ts):
     revised_prompt = response.data[0].revised_prompt
     image_url = response.data[0].url
 
+    if revised_prompt == None:
+        raise Exception("Failed to generate image.")
+    if image_url == None:
+        raise Exception("Failed to generate image.")
+
     file_ext = image_url.split(".")[-1].split("?")[0]
-    filename = "{}.{}".format(IMAGE_MODEL, file_ext)
+    filename = "{}.{}".format(env_config.IMAGE_MODEL, file_ext)
 
     file = get_image_from_url(image_url)
 
@@ -231,7 +191,7 @@ def reply_image(prompt, say, channel, thread_ts, latest_ts):
 
 # Get thread messages using conversations.replies API method
 def conversations_replies(
-    channel, ts, client_msg_id, messages=[], MAX_LEN_OPENAI=MAX_LEN_OPENAI
+    channel, ts, client_msg_id, messages=[], MAX_LEN_OPENAI=env_config.MAX_LEN_OPENAI
 ):
     try:
         response = app.client.conversations_replies(channel=channel, ts=ts)
@@ -273,11 +233,11 @@ def conversations_replies(
     except Exception as e:
         print("conversations_replies: {}".format(e))
 
-    if SYSTEM_MESSAGE != "None":
+    if env_config.SYSTEM_MESSAGE != "None":
         messages.append(
             {
                 "role": "system",
-                "content": SYSTEM_MESSAGE,
+                "content": env_config.SYSTEM_MESSAGE,
             }
         )
 
@@ -321,7 +281,7 @@ def conversation(say: Say, thread_ts, content, channel, user, client_msg_id):
 
     except Exception as e:
         print("conversation: Error handling message: {}".format(e))
-        print("conversation: OpenAI Model: {}".format(OPENAI_MODEL))
+        print("conversation: OpenAI Model: {}".format(env_config.OPENAI_MODEL))
 
         message = f"```{e}```"
 
@@ -372,17 +332,21 @@ def image_generate(say: Say, thread_ts, content, channel, client_msg_id):
             print("image_generate: {}".format(messages))
 
             response = openai.chat.completions.create(
-                model=OPENAI_MODEL,
+                model=env_config.OPENAI_MODEL,
                 messages=messages,
                 # temperature=TEMPERATURE,
             )
 
             print("image_generate: {}".format(response))
 
-            prompts.append(response.choices[0].message.content)
+            content = response.choices[0].message.content
+            if content == None:
+                raise Exception("Failed to generate image content.")
+
+            prompts.append(content)
 
         except Exception as e:
-            print("image_generate: OpenAI Model: {}".format(OPENAI_MODEL))
+            print("image_generate: OpenAI Model: {}".format(env_config.OPENAI_MODEL))
             print("image_generate: Error handling message: {}".format(e))
 
     # Send the prompt to ChatGPT
@@ -410,7 +374,7 @@ def image_generate(say: Say, thread_ts, content, channel, client_msg_id):
         print("image_generate: {}".format(messages))
 
         response = openai.chat.completions.create(
-            model=OPENAI_MODEL,
+            model=env_config.OPENAI_MODEL,
             messages=messages,
             # temperature=TEMPERATURE,
         )
@@ -419,10 +383,13 @@ def image_generate(say: Say, thread_ts, content, channel, client_msg_id):
 
         prompt = response.choices[0].message.content
 
+        if prompt == None:
+            raise Exception("Failed to generate image prompt.")
+
         chat_update(say, channel, thread_ts, latest_ts, prompt + " " + BOT_CURSOR)
 
     except Exception as e:
-        print("image_generate: OpenAI Model: {}".format(OPENAI_MODEL))
+        print("image_generate: OpenAI Model: {}".format(env_config.OPENAI_MODEL))
         print("image_generate: Error handling message: {}".format(e))
 
     # Generate the image
@@ -437,7 +404,7 @@ def image_generate(say: Say, thread_ts, content, channel, client_msg_id):
         # app.client.chat_delete(channel=channel, ts=latest_ts)
 
     except Exception as e:
-        print("image_generate: OpenAI Model: {}".format(IMAGE_MODEL))
+        print("image_generate: OpenAI Model: {}".format(env_config.IMAGE_MODEL))
         print("image_generate: Error handling message: {}".format(e))
 
         message = f"```{e}```"
@@ -463,7 +430,7 @@ def get_image_from_url(image_url, token=None):
 
 # Get image from Slack
 def get_image_from_slack(image_url):
-    return get_image_from_url(image_url, SLACK_BOT_TOKEN)
+    return get_image_from_url(image_url, env_config.SLACK_BOT_TOKEN)
 
 
 # Get encoded image from Slack
@@ -480,7 +447,7 @@ def get_encoded_image_from_slack(image_url):
 def content_from_message(prompt, event):
     type = "text"
 
-    if KEYWARD_IMAGE in prompt:
+    if KEYWORD_IMAGE in prompt:
         type = "image"
 
     content = []
@@ -489,7 +456,7 @@ def content_from_message(prompt, event):
     if "files" in event:
         files = event.get("files", [])
         for file in files:
-            mimetype = file["mimetype"]
+            mimetype: str = file["mimetype"]
             if mimetype.startswith("image"):
                 image_url = file.get("url_private")
                 base64_image = get_encoded_image_from_slack(image_url)
