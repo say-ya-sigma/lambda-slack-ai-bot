@@ -1,5 +1,0 @@
-boto3
-openai
-slack-bolt
-slack-sdk
-requests
