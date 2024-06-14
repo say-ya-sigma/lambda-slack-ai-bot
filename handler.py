@@ -15,6 +15,8 @@ from openai import OpenAI
 from env import env_config
 from slack_keyword import *
 
+from entity.app_mention_body import AppMentionBodyEvent
+
 # Initialize Slack app
 app = App(
     token=env_config.SLACK_BOT_TOKEN,
@@ -479,24 +481,24 @@ def content_from_message(prompt, event):
 def handle_mention(body: dict, say: Say):
     print("handle_mention: {}".format(body))
 
-    event = body["event"]
+    rawEvent: dict = body["event"]
+    event = AppMentionBodyEvent(
+        thread_ts=rawEvent.get("thread_ts", rawEvent["ts"]),
+        text=rawEvent["text"],
+        channel=rawEvent["channel"],
+        user=rawEvent["user"],
+        client_msg_id=rawEvent["client_msg_id"],
+        files=rawEvent.get("files", []),
+    )
 
-    # if "bot_id" in event:
-    #     # Ignore messages from the bot itself
-    #     return
+    prompt = re.sub(f"<@{bot_id}>", "", event.text).strip()
 
-    thread_ts = event["thread_ts"] if "thread_ts" in event else event["ts"]
-    prompt = re.sub(f"<@{bot_id}>", "", event["text"]).strip()
-    channel = event["channel"]
-    user = event["user"]
-    client_msg_id = event["client_msg_id"]
-
-    content, type = content_from_message(prompt, event)
+    content, type = content_from_message(prompt, rawEvent)
 
     if type == "image":
-        image_generate(say, thread_ts, content, channel, client_msg_id)
+        image_generate(say, event.thread_ts, content, event.channel, event.client_msg_id)
     else:
-        conversation(say, thread_ts, content, channel, user, client_msg_id)
+        conversation(say, event.thread_ts, content, event.channel, event.user, event.client_msg_id)
 
 
 # Handle the DM (direct message) event
