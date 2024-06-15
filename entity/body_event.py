@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 
 @dataclass(frozen=True)
-class AppMentionBodyEvent:
+class BodyEvent:
   thread_ts: str
   text: str
   channel: str

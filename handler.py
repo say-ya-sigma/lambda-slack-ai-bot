@@ -15,7 +15,7 @@ from openai import OpenAI
 from env import env_config
 from slack_keyword import *
 
-from entity.app_mention_body import AppMentionBodyEvent
+from entity.body_event import BodyEvent
 
 # Initialize Slack app
 app = App(
@@ -482,7 +482,7 @@ def handle_mention(body: dict, say: Say):
     print("handle_mention: {}".format(body))
 
     rawEvent: dict = body["event"]
-    event = AppMentionBodyEvent(
+    event = BodyEvent(
         thread_ts=rawEvent.get("thread_ts", rawEvent["ts"]),
         text=rawEvent["text"],
         channel=rawEvent["channel"],
@@ -505,25 +505,30 @@ def handle_mention(body: dict, say: Say):
 @app.event("message")
 def handle_message(body: dict, say: Say):
     print("handle_message: {}".format(body))
+    
+    rawEvent: dict = body["event"]
 
-    event = body["event"]
-
-    if "bot_id" in event:
+    if "bot_id" in rawEvent:
         # Ignore messages from the bot itself
         return
 
-    prompt = event["text"].strip()
-    channel = event["channel"]
-    user = event["user"]
-    client_msg_id = event["client_msg_id"]
+    event = BodyEvent(
+        thread_ts=rawEvent.get("thread_ts", rawEvent["ts"]),
+        text=rawEvent["text"],
+        channel=rawEvent["channel"],
+        user=rawEvent["user"],
+        client_msg_id=rawEvent["client_msg_id"],
+        files=rawEvent.get("files", []),
+    )
+    prompt = event.text.strip()
 
-    content, type = content_from_message(prompt, event)
+    content, type = content_from_message(prompt, rawEvent)
 
     # Use thread_ts=None for regular messages, and user ID for DMs
     if type == "image":
-        image_generate(say, None, content, channel, client_msg_id)
+        image_generate(say, None, content, event.channel, event.client_msg_id)
     else:
-        conversation(say, None, content, channel, user, client_msg_id)
+        conversation(say, None, content, event.channel, event.user, event.client_msg_id)
 
 
 # Handle the Lambda function
