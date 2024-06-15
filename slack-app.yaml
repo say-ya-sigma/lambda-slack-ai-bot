@@ -1,7 +1,7 @@
 display_information:
-  name: My Slack App
+  name: OpenAI-bot
   description: A simple Slack app using Bolt for JavaScript
-  background_color: "#FFFFFF"
+  background_color: "#222222"
 features:
   bot_user:
     display_name: My Slack App
