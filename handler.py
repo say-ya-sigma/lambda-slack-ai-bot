@@ -15,7 +15,10 @@ from openai.types.chat import \
     ChatCompletionMessageParam,\
     ChatCompletionUserMessageParam,\
     ChatCompletionAssistantMessageParam,\
-    ChatCompletionSystemMessageParam
+    ChatCompletionSystemMessageParam,\
+    ChatCompletionContentPartParam,\
+    ChatCompletionContentPartTextParam,\
+    ChatCompletionContentPartImageParam
 
 from env import env_config
 from slack_keyword import *
@@ -262,19 +265,26 @@ def conversations_replies(
 
 
 # Handle the chatgpt conversation
-def conversation(say: Say, thread_ts, content, channel, user, client_msg_id):
+def conversation(
+    say: Say,
+    thread_ts: str|None,
+    content: list[ChatCompletionContentPartParam],
+    channel: str,
+    user: str,
+    client_msg_id: str
+):
     print("conversation: {}".format(json.dumps(content)))
 
     # Keep track of the latest message timestamp
     result = say(text=BOT_CURSOR, thread_ts=thread_ts)
     latest_ts = result["ts"]
 
-    messages = []
+    messages: list[ChatCompletionMessageParam] = []
     messages.append(
-        {
-            "role": "user",
-            "content": content,
-        },
+        ChatCompletionUserMessageParam(
+            role="user",
+            content=content,
+        ),
     )
 
     # Get the thread messages
@@ -304,14 +314,20 @@ def conversation(say: Say, thread_ts, content, channel, user, client_msg_id):
 
 
 # Handle the image generation
-def image_generate(say: Say, thread_ts, content, channel, client_msg_id):
+def image_generate(
+    say: Say,
+    thread_ts: str|None,
+    content: list[ChatCompletionContentPartParam],
+    channel: str,
+    client_msg_id: str
+):
     print("image_generate: {}".format(content))
 
     # Keep track of the latest message timestamp
     result = say(text=BOT_CURSOR, thread_ts=thread_ts)
     latest_ts = result["ts"]
 
-    prompt = content[0]["text"]
+    prompt = content[0]["text"] if content[0]["type"] == "text" else ""
 
     prompts = []
 
@@ -333,14 +349,15 @@ def image_generate(say: Say, thread_ts, content, channel, client_msg_id):
     if len(content) > 1:
         chat_update(say, channel, thread_ts, latest_ts, MSG_IMAGE_DESCRIBE)
 
-        content[0]["text"] = COMMAND_DESCRIBE
+        if content[0]["type"] == "text":
+            content[0]["text"] = COMMAND_DESCRIBE
 
         messages = []
         messages.append(
-            {
-                "role": "user",
-                "content": content,
-            },
+            ChatCompletionUserMessageParam(
+                role="user",
+                content=content,
+            ),
         )
 
         try:
@@ -354,11 +371,11 @@ def image_generate(say: Say, thread_ts, content, channel, client_msg_id):
 
             print("image_generate: {}".format(response))
 
-            content = response.choices[0].message.content
-            if content == None:
+            response_content = response.choices[0].message.content
+            if response_content == None:
                 raise Exception("Failed to generate image content.")
 
-            prompts.append(content)
+            prompts.append(response_content)
 
         except Exception as e:
             print("image_generate: OpenAI Model: {}".format(env_config.OPENAI_MODEL))
@@ -375,15 +392,15 @@ def image_generate(say: Say, thread_ts, content, channel, client_msg_id):
 
         messages = []
         messages.append(
-            {
-                "role": "user",
-                "content": [
+            ChatCompletionUserMessageParam(
+                role="user",
+                content=[
                     {
                         "type": "text",
                         "text": "\n\n\n".join(prompts),
                     }
                 ],
-            },
+            ),
         )
 
         print("image_generate: {}".format(messages))
@@ -460,8 +477,13 @@ def get_encoded_image_from_slack(image_url):
 
 # Extract content from the message
 def content_from_message(prompt: str, files: list[dict]):
-    content = []
-    content.append({"type": "text", "text": prompt})
+    content: list[ChatCompletionContentPartParam] = []
+    content.append(
+        ChatCompletionContentPartTextParam(
+            type="text",
+            text=prompt
+        )
+    )
 
     for file in files:
         mimetype: str = file["mimetype"]
@@ -470,12 +492,12 @@ def content_from_message(prompt: str, files: list[dict]):
             base64_image = get_encoded_image_from_slack(image_url)
             if base64_image:
                 content.append(
-                    {
-                        "type": "image_url",
-                        "image_url": {
+                    ChatCompletionContentPartImageParam(
+                        type="image_url",
+                        image_url= {
                             "url": f"data:{mimetype};base64,{base64_image}"
-                        },
-                    }
+                        }
+                    )
                 )
 
     return content
