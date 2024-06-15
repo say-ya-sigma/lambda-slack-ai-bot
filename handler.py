@@ -11,6 +11,11 @@ from slack_bolt import App, Say
 from slack_bolt.adapter.aws_lambda import SlackRequestHandler
 
 from openai import OpenAI
+from openai.types.chat import \
+    ChatCompletionMessageParam,\
+    ChatCompletionUserMessageParam,\
+    ChatCompletionAssistantMessageParam,\
+    ChatCompletionSystemMessageParam
 
 from env import env_config
 from slack_keyword import *
@@ -193,7 +198,11 @@ def reply_image(prompt, say, channel, thread_ts, latest_ts):
 
 # Get thread messages using conversations.replies API method
 def conversations_replies(
-    channel, ts, client_msg_id, messages=[], MAX_LEN_OPENAI=env_config.MAX_LEN_OPENAI
+    channel,
+    ts,
+    client_msg_id,
+    messages: list[ChatCompletionMessageParam]=[],
+    MAX_LEN_OPENAI=env_config.MAX_LEN_OPENAI
 ):
     try:
         response = app.client.conversations_replies(channel=channel, ts=ts)
@@ -207,7 +216,7 @@ def conversations_replies(
                 )
             )
 
-        res_messages = response.get("messages", [])
+        res_messages: list[dict] = response.get("messages", [])
         res_messages.reverse()
         res_messages.pop(0)  # remove the first message
 
@@ -215,16 +224,20 @@ def conversations_replies(
             if message.get("client_msg_id", "") == client_msg_id:
                 continue
 
-            role = "user"
-            if message.get("bot_id", "") != "":
-                role = "assistant"
-
-            messages.append(
-                {
-                    "role": role,
-                    "content": message.get("text", ""),
-                }
-            )
+            if message.get("bot_id", "") == "":
+                messages.append(
+                    ChatCompletionUserMessageParam(
+                        role="user",
+                        content=message.get("text", ""),
+                    )
+                )
+            else:
+                messages.append(
+                    ChatCompletionAssistantMessageParam(
+                        role="assistant",
+                        content=message.get("text", ""),
+                    )
+                )
 
             # print("conversations_replies: messages size: {}".format(sys.getsizeof(messages)))
 
@@ -235,12 +248,12 @@ def conversations_replies(
     except Exception as e:
         print("conversations_replies: {}".format(e))
 
-    if env_config.SYSTEM_MESSAGE != "None":
+    if env_config.SYSTEM_MESSAGE != None:
         messages.append(
-            {
-                "role": "system",
-                "content": env_config.SYSTEM_MESSAGE,
-            }
+            ChatCompletionSystemMessageParam(
+                role="system",
+                content=env_config.SYSTEM_MESSAGE
+            )
         )
 
     print("conversations_replies: {}".format(messages))
@@ -313,7 +326,7 @@ def image_generate(say: Say, thread_ts, content, channel, client_msg_id):
         prompts = [
             f"{reply['role']}: {reply['content']}"
             for reply in replies
-            if reply["content"].strip()
+            if reply["role"] != "assistant"
         ]
 
     # Get the image content
