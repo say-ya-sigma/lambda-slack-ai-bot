@@ -7,4 +7,4 @@ class BodyEvent:
   channel: str
   user: str
   client_msg_id: str
-  files: list
+  files: list[dict]

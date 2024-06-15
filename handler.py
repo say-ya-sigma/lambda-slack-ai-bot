@@ -446,34 +446,26 @@ def get_encoded_image_from_slack(image_url):
 
 
 # Extract content from the message
-def content_from_message(prompt, event):
-    type = "text"
-
-    if KEYWORD_IMAGE in prompt:
-        type = "image"
-
+def content_from_message(prompt: str, files: list[dict]):
     content = []
     content.append({"type": "text", "text": prompt})
 
-    if "files" in event:
-        files = event.get("files", [])
-        for file in files:
-            mimetype: str = file["mimetype"]
-            if mimetype.startswith("image"):
-                image_url = file.get("url_private")
-                base64_image = get_encoded_image_from_slack(image_url)
-                if base64_image:
-                    content.append(
-                        {
-                            "type": "image_url",
-                            "image_url": {
-                                # "url": image_url,
-                                "url": f"data:{mimetype};base64,{base64_image}"
-                            },
-                        }
-                    )
+    for file in files:
+        mimetype: str = file["mimetype"]
+        if mimetype.startswith("image"):
+            image_url = file.get("url_private")
+            base64_image = get_encoded_image_from_slack(image_url)
+            if base64_image:
+                content.append(
+                    {
+                        "type": "image_url",
+                        "image_url": {
+                            "url": f"data:{mimetype};base64,{base64_image}"
+                        },
+                    }
+                )
 
-    return content, type
+    return content
 
 
 # Handle the app_mention event
@@ -493,9 +485,11 @@ def handle_mention(body: dict, say: Say):
 
     prompt = re.sub(f"<@{bot_id}>", "", event.text).strip()
 
-    content, type = content_from_message(prompt, rawEvent)
+    messageType = "image" if KEYWORD_IMAGE in prompt else "text"
 
-    if type == "image":
+    content = content_from_message(prompt, event.files)
+
+    if messageType == "image":
         image_generate(say, event.thread_ts, content, event.channel, event.client_msg_id)
     else:
         conversation(say, event.thread_ts, content, event.channel, event.user, event.client_msg_id)
@@ -522,10 +516,12 @@ def handle_message(body: dict, say: Say):
     )
     prompt = event.text.strip()
 
-    content, type = content_from_message(prompt, rawEvent)
+    messageType = "image" if KEYWORD_IMAGE in prompt else "text"
+
+    content = content_from_message(prompt, event.files)
 
     # Use thread_ts=None for regular messages, and user ID for DMs
-    if type == "image":
+    if messageType == "image":
         image_generate(say, None, content, event.channel, event.client_msg_id)
     else:
         conversation(say, None, content, event.channel, event.user, event.client_msg_id)
